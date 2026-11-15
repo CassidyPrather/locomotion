@@ -179,6 +179,7 @@ GameObject:
   - component: {fileID: 8053836308786314978}
   - component: {fileID: 5936914165850342495}
   - component: {fileID: 5024323807967490905}
+  - component: {fileID: 7530787739459396028}
   m_Layer: 0
   m_Name: Wirenook Flight
   m_TagString: Untagged
@@ -318,9 +319,22 @@ MonoBehaviour:
   id: flight
   label: Flight
   icon: {fileID: 2800000, guid: b5ac0f41a1aedb042a68b2a3768c417f, type: 3}
+  summaryIcon: {fileID: 2800000, guid: b5ac0f41a1aedb042a68b2a3768c417f, type: 3}
   tag: flight
   tagPriority: 80
   joinAvatarMesh: 1
+--- !u!114 &7530787739459396028
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6324623896854581831}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ee1467e0dd24a5b4781552a7a0a1d130, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1001 &5420793158548914530
 PrefabInstance:
   m_ObjectHideFlags: 0

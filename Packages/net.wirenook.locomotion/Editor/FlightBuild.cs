@@ -126,7 +126,9 @@ namespace Wirenook.Locomotion.Editor
                 FeaturePrefab.Parameters(root, FeaturePrefab.SyncedBool(Enabled));
                 FeaturePrefab.InstallMenu(root);
                 FeaturePrefab.MenuToggle(root, "Flight", "flight", Enabled);
-                FeaturePrefab.Describe(root, "flight", "Flight", "flight", "flight", 80, joinAvatarMesh: true);
+                // The platform is a collider, and VRChat ranks an Android or
+                // iOS avatar with any collider Very Poor.
+                FeaturePrefab.Describe(root, "flight", "Flight", "flight", "flight", 80, joinAvatarMesh: true, pcOnly: true);
             });
             AssetDatabase.SaveAssets();
             Debug.Log("[locomotion] Rebuilt flight.");
