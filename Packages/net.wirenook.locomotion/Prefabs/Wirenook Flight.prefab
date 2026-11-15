@@ -384,6 +384,21 @@ PrefabInstance:
       propertyPath: m_Name
       value: flight-cloud
       objectReference: {fileID: 0}
+    - target: {fileID: 9142068182449212500, guid: 699f831b6f382fc4e899224703606981,
+        type: 3}
+      propertyPath: m_LocalScale.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 9142068182449212500, guid: 699f831b6f382fc4e899224703606981,
+        type: 3}
+      propertyPath: m_LocalScale.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 9142068182449212500, guid: 699f831b6f382fc4e899224703606981,
+        type: 3}
+      propertyPath: m_LocalScale.z
+      value: 0
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
