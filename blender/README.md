@@ -6,6 +6,8 @@ Each prop is generated from code, saved here as `.blend`, validated, exported as
 | Source | Prop | Bones | Notes |
 | --- | --- | --- | --- |
 | `flight-cloud.blend` | `FlightCloud`: flat cloud under a flying avatar, 0.7 m across, 0.15 m thick | `FlightCloud` (centre of top surface) | Everything hangs below the root. Tail puff marks the back |
+| `ladder.blend` | `Ladder`: telescoping stepladder, 0.64 m wide, 2.9 m at full stretch | `Ladder` (ground, centre; carries nothing), `Ladder.Base` (ground), `Ladder.S1` to `Ladder.S8` (top of each step, 0.36 m apart) | Unity spreads the steps between the ground and the feet. Each step carries the rail below it; `S8` is the platform |
+| `zzz.blend` | `Zzz`: three Zs, 7, 10 and 14 cm | `Zzz` (base of the stack), `Zzz.Z1` to `Zzz.Z3` (centre of each letter) | Drawn on both faces; rises up and to the right |
 
 ## Rebuild
 

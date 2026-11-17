@@ -50,6 +50,68 @@ Other entry points, also under **Tools > Wirenook > Locomotion**:
 - `LocomotionBuild.Verify()` runs every check described under
   [Verification](#verification) against the shipped bake and returns the report.
 
+## Also in the package
+
+Three more drop-in prefabs. Each is independent of the gaits and of the
+others.
+
+| Prefab | What it does | Synced bits | Rank cost |
+| --- | --- | --- | --- |
+| `Wirenook Flight` | A cloud under the feet to stand on in mid-air (see `Editor/FlightBuild.cs`). PC only. | 1 | 1 collider, 1 constraint |
+| `Wirenook Stepladder` | A ladder that comes out under your feet when you have lifted yourself off the floor by moving your play space. | 2 | 11 constraints, 9 bones |
+| `Wirenook Nap` | While you are away (VRChat's AFK) the avatar stands asleep, nodding off, with Zs rising from its head, instead of VRChat's kneel. | 0 | 3 bones |
+
+### Stepladder
+
+VRChat keeps an avatar's root on the ground under the player while tracking
+carries the body wherever the headset is, so someone who has dragged their
+play space up half a metre is seen hovering. The ladder fills the gap: a
+base on the ground under the feet, a platform under the soles, and seven
+steps spread evenly between.
+
+Nothing about its shape is animated or synced. Each step is held by a
+position constraint at a fixed share of the way from the base to the
+platform, both of which follow the feet as each viewer sees them, so it is
+the right height on every client by construction. It reaches 2.9 m; lower
+than that the lengths of rail overlap, which a flat colour hides, and the
+lowest length runs into the floor.
+
+Whether it is out is one synced bit, and the wearer's client decides it. A
+contact on the ground reads how high the soles are (the sender-position
+output of SDK 3.10.6). The ladder comes out once they have been more than
+0.30 m up for 0.4 s, with the player grounded and not seated, so hops and
+chairs do not count; it goes away below 0.18 m. The gap between the two
+heights keeps it from flickering at the edge, and deciding in one place
+keeps every viewer in agreement. The menu's "Stepladder" switch (on by
+default) is permission for it to come out by itself.
+
+It also serves for sitting on the floor in the air: the reading is the
+midpoint of the two ankles less an ankle's height, which is the lowest part
+of a figure that is standing, or sitting with its legs down.
+
+The model is skinned and joins the avatar's mesh, so it costs no mesh or
+material slot. The price is that a merged mesh is culled by the avatar's
+own bounds: the foot of a tall ladder can blink out for a viewer who can
+see it but not the wearer above it.
+
+### Nap
+
+`NapCycle` (in `Runtime/Core`, beside the gaits) is the pose: the ordinary
+stand let go, with the chest slumped, the arms hanging plumb, the head
+forward and to one side, three slow breaths to a loop and the head sinking
+until it is caught with a small start. It is baked like the gaits and has
+the same kind of tests.
+
+It goes into the Action playable layer as a layer added on top of whatever
+is there, which for most avatars is VRChat's default. That default already
+raises the Action layer and hands the body from tracking to animation while
+AFK is set, and none of it is replaced: the nap is a second pose over
+VRChat's kneel, on a layer whose weight is faded up while AFK is set and
+down after. At weight zero it changes nothing, so emotes play as before.
+
+The Zs are a small model on the head, switched by the same AFK flag, which
+VRChat syncs itself.
+
 ## The gait model
 
 The model lives in `Runtime/Core/`, has no Unity dependency and is unit-tested
@@ -353,6 +415,32 @@ confirm: that a collider on your own avatar holds up your own player
 capsule (the basis of every collider-flight prefab), and that jumping off
 such a collider works as it does off world geometry. The collider is on
 the Default layer. The thresholds above are first guesses.
+
+## Stepladder and nap: what was checked
+
+Rebuild them with `Tools > Wirenook > Locomotion > Rebuild Stepladder` and
+`Rebuild Nap`.
+
+Neither has been run in the VRChat client. Checked in the editor: both
+build onto an avatar through Modular Avatar and Avatar Optimizer with every
+curve arriving at an object that exists; the nap lands in the Action layer
+after VRChat's default layers with its weight control pointing at its own
+pose layer; the nap pose was looked at on an avatar from three cameras at
+four moments of its loop; `NapCycle` has three headless tests.
+
+Not checked, because only a client can:
+
+- That the ground contact's reading is the soles' height in metres. If it
+  is scaled otherwise the ladder comes out at the wrong height or not at
+  all; the two thresholds in `StepladderBuild` are the place to correct it.
+- That an avatar's root stays on the ground while the play space is moved,
+  which is what the whole idea rests on, and how `Grounded` behaves then.
+- The constraints. Two weighted sources should put a step at their
+  weighted average; `net.wirenook.world-sync` relies on the same thing and
+  has not seen it in a client either.
+- How the nap sits over VRChat's own AFK pose in the legs and feet, which
+  come from both, and whether 0.25 s is long enough to fade out under
+  VRChat's own blend back to tracking.
 
 ## Development
 
