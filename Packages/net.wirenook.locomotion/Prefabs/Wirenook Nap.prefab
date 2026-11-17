@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 150845877951914042}
   - component: {fileID: 5844017327909683600}
+  - component: {fileID: 4710675204093394695}
   m_Layer: 0
   m_Name: Zs
   m_TagString: Untagged
@@ -58,6 +59,18 @@ MonoBehaviour:
     targetObject: {fileID: 0}
   layerPriority: 0
   mergeAnimatorMode: 0
+--- !u!114 &4710675204093394695
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 135506867782845781}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ee1467e0dd24a5b4781552a7a0a1d130, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &5057081300203885161
 GameObject:
   m_ObjectHideFlags: 0

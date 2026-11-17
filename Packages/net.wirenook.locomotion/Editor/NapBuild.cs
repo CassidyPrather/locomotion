@@ -89,6 +89,10 @@ namespace Wirenook.Locomotion.Editor
                 // The Zs are a feature of their own under the nap, so that
                 // their animator can be merged into FX by the usual route.
                 var zs = FeaturePrefab.Child(root, "Zs");
+                // The Zs are a second material on the avatar's mesh, and on
+                // Android and iOS a third material slot is the difference
+                // between Medium and Poor. The nap itself is kept there.
+                FeaturePrefab.Ensure<Wirenook.Assets.WirenookPcOnly>(zs);
                 var mount = FeaturePrefab.Child(zs, "Mount");
                 FeaturePrefab.AttachToBone(mount, HumanBodyBones.Head);
                 mount.GetComponent<ModularAvatarBoneProxy>().attachmentMode = BoneProxyAttachmentMode.AsChildKeepRotation;
