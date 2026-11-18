@@ -19,15 +19,18 @@ namespace Wirenook.Locomotion.Editor
         private readonly AnimatorController _base;
         private readonly AnimatorController _additive;
         private readonly HumanoidRig _rig;
+        private readonly int _style;
         private readonly StringBuilder _report = new StringBuilder();
         private bool _passed = true;
 
+        /// <param name="style">Which of a controller's styles <paramref name="bake"/> is; 0 when it holds one.</param>
         private ControllerVerifier(LocomotionBake bake, GameObject rigSource, AnimatorController baseController,
-            AnimatorController additive)
+            AnimatorController additive, int style = 0)
         {
             _bake = bake;
             _base = baseController;
             _additive = additive;
+            _style = style;
             _rig = new HumanoidRig(rigSource);
         }
 
@@ -39,6 +42,7 @@ namespace Wirenook.Locomotion.Editor
         {
             using var verifier = new ControllerVerifier(bake, rigSource, baseController, additive);
             verifier.GaitsMatchTheModel();
+            verifier.CrouchingPlaysItsOwnGait();
             verifier.FeetHoldTheGroundBetweenSamples();
             verifier.CadenceRisesBeyondTheFastestGait();
             verifier.PostureFollowsUpright();
@@ -61,9 +65,24 @@ namespace Wirenook.Locomotion.Editor
             return verifier._passed;
         }
 
+        /// <summary>
+        /// Whether one style of a controller that holds several plays that
+        /// style's own gaits, standing and crouched, once it is chosen.
+        /// </summary>
+        public static bool VerifyStyle(LocomotionBake bake, int style, GameObject rigSource, AnimatorController baseController,
+            AnimatorController additive, out string report)
+        {
+            using var verifier = new ControllerVerifier(bake, rigSource, baseController, additive, style);
+            verifier.GaitsMatchTheModel();
+            verifier.CrouchingPlaysItsOwnGait();
+            report = (verifier._passed ? "PASS" : "FAIL") + ": style " + style + " (" + bake.Name + ")\n" + verifier._report;
+            return verifier._passed;
+        }
+
         private LayerStackSimulator Start(bool withAdditive = true, float vrMode = 0f, float trackingType = 3f)
         {
             var simulator = new LayerStackSimulator(_rig.Animator, _base, withAdditive ? _additive : null);
+            simulator.Set(LocomotionControllers.Style, _style);
             simulator.Set(LocomotionControllers.Grounded, 1f);
             simulator.Set(LocomotionControllers.Upright, 1f);
             simulator.Set(LocomotionControllers.VRMode, vrMode);
@@ -119,6 +138,47 @@ namespace Wirenook.Locomotion.Editor
         }
 
         /// <summary>
+        /// Below VRChat's crouching threshold the tree must play the crouched
+        /// gait baked for the velocity, low and with the knees bent, for both
+        /// audiences and mirrored.
+        /// </summary>
+        private void CrouchingPlaysItsOwnGait()
+        {
+            var cases = new (float right, float forward, bool tracked)[]
+            {
+                (0f, 1.25f, false), (0f, -1.25f, false), (-1.25f, 0f, false), (1.25f, 1.25f, false), (0f, 2f, true),
+                (-1.25f, -1.25f, true),
+            };
+            float worst = 0f, highest = 0f;
+            float standing = _bake.Body.AnkleHeight + _bake.Body.LegLength;
+            foreach (var (right, forward, tracked) in cases)
+            {
+                using var simulator = Start(false, tracked ? 1f : 0f);
+                simulator.Set(LocomotionControllers.Upright, 0.55f);
+                Move(simulator, right, forward);
+                var style = tracked ? _bake.Profile.ForTrackedUpperBody() : _bake.Profile;
+                var cycle = new GaitCycle(style, _bake.Body, GaitRequest.FromVelocity(right, forward), crouched: true);
+                // Long enough for the half-second fade from standing to finish.
+                simulator.Run(1.5f, Frame);
+                for (int i = 0; i < 90; i++)
+                {
+                    simulator.Step(Frame);
+                    float phase = simulator.Base.GetCurrentAnimatorStateInfo(0).normalizedTime;
+                    var expected = _rig.Fit(cycle.Evaluate(phase), _bake.Body);
+                    worst = Mathf.Max(worst, (_rig.Ankle(Side.Left) - expected.LeftFoot.Ankle.ToUnity()).magnitude);
+                    worst = Mathf.Max(worst, (_rig.Ankle(Side.Right) - expected.RightFoot.Ankle.ToUnity()).magnitude);
+                    float hips = 0.5f * (_rig.RootPosition(HumanBodyBones.LeftUpperLeg).y + _rig.RootPosition(HumanBodyBones.RightUpperLeg).y);
+                    highest = Mathf.Max(highest, hips / (standing * _rig.Measured.LegLength / _bake.Body.LegLength));
+                }
+            }
+
+            Check("crouching plays the baked crouched gait at its own velocity, low on bent legs",
+                worst <= BakeVerifier.AnkleTolerance && highest < 0.8f,
+                "worst ankle error " + Millimetres(worst) + " over " + cases.Length + " velocities; hips at most " +
+                highest.ToString("P0") + " of standing height");
+        }
+
+        /// <summary>
         /// Between baked velocities the tree blends neighbours, and their
         /// stride lengths and cadences do not combine into exactly the
         /// requested speed. This measures how far off the planted foot is.
@@ -127,11 +187,13 @@ namespace Wirenook.Locomotion.Editor
         {
             var atSamples = new (float, float)[]
             {
-                (0f, 0.7f), (0f, 1.2f), (0f, 2f), (0f, 4f), (0f, 6f), (2f, 0f), (-2f, 4f), (0f, -2f), (-4f, 0f),
+                (0f, 0.7f), (0f, 1.2f), (0f, 2f), (0f, 3f), (0f, 4f), (0f, 6f), (1.2f, 0f), (2f, 0f), (-2f, 4f),
+                (0f, -1.2f), (0f, -2f), (-4f, 0f),
             };
             var between = new (float, float)[]
             {
-                (0f, 1f), (0f, 1.6f), (0f, 3f), (0f, 5f), (1.2f, 0f), (1.4f, 1.4f), (-1.4f, 2.8f), (0f, -3f), (1f, 3f),
+                (0f, 1f), (0f, 1.6f), (0f, 2.5f), (0f, 3.5f), (0f, 5f), (1f, 0f), (1.6f, 0f), (1.4f, 1.4f), (-1.4f, 2.8f),
+                (0f, -1.6f), (0f, -2.5f), (0f, -3.5f), (1f, 3f),
             };
             float worstAtSamples = 0f, worstBetween = 0f;
             var detail = new StringBuilder();
@@ -271,7 +333,22 @@ namespace Wirenook.Locomotion.Editor
                 simulator.Run(seconds, Frame);
                 bool there = simulator.IsInState(simulator.Base, 0, state);
                 passed &= there;
-                seen.Append(" " + state + (there ? "" : "(!)"));
+                seen.Append(" " + state + (there ? "" : "(! in " + Where(simulator) + ")"));
+            }
+
+            // Which state the locomotion layer is really in, for when it is not the one expected.
+            string Where(LayerStackSimulator simulator)
+            {
+                foreach (string name in new[]
+                         {
+                             "Standing", "Crouching", "Prone", "SmallHop", "Short Fall", "LongFall", "QuickLand", "HardLand",
+                             "RestoreTracking", "RestoreToHop",
+                         })
+                {
+                    if (simulator.IsInState(simulator.Base, 0, name)) return name;
+                }
+
+                return "no known state";
             }
 
             using (var simulator = Start(false))
@@ -285,11 +362,9 @@ namespace Wirenook.Locomotion.Editor
                 Expect(simulator, 0.3f, "Short Fall");
                 simulator.Set(LocomotionControllers.Grounded, 1f);
                 simulator.Set(LocomotionControllers.VelocityY, 0f);
-                // The way out of QuickLand waits for its clip to finish. The
-                // SDK's proxy_land_quick is a zero-length placeholder for the
-                // client's real clip, so in the editor it never does; the
-                // hard landing below takes the same way back with a clip that ends.
+                // The way out of QuickLand waits for its clip to finish.
                 Expect(simulator, 0.15f, "QuickLand");
+                Expect(simulator, 1.5f, "Standing");
             }
 
             seen.Append(" |");

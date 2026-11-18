@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using nadena.dev.modular_avatar.core;
 using UnityEditor;
 using UnityEditor.Animations;
@@ -11,11 +13,12 @@ using Wirenook.Assets.Editor;
 namespace Wirenook.Locomotion.Editor
 {
     /// <summary>
-    /// Entry points: regenerate the bake that ships with the package, or bake
-    /// a set fitted to one avatar. Both return a short text report. Clips are
-    /// checked before anything is written, so a bad bake never replaces a good
-    /// one; the controllers can only be checked once they exist, and a
-    /// failure there throws with the report.
+    /// Entry points: regenerate the bake that ships with the package, bake
+    /// a set fitted to one avatar, or bake every named style for one avatar
+    /// behind a menu to choose between. All return a short text report.
+    /// Clips are checked before anything is written, so a bad bake never
+    /// replaces a good one; the controllers can only be checked once they
+    /// exist, and a failure there throws with the report.
     /// </summary>
     public static class LocomotionBuild
     {
@@ -25,6 +28,7 @@ namespace Wirenook.Locomotion.Editor
         public const string DefaultProfilePath = PackageRoot + "/Profiles/Weighty Gait.asset";
 
         private const string PrefabFile = "Wirenook Locomotion.prefab";
+        private const string StylesPrefabFile = "Wirenook Locomotion Styles.prefab";
         private const string ProfileFile = "Gait Profile.asset";
 
         /// <summary>
@@ -38,6 +42,9 @@ namespace Wirenook.Locomotion.Editor
         public static string Rebuild()
         {
             var profile = AssetFolders.LoadOrCreate(DefaultProfilePath, ScriptableObject.CreateInstance<GaitProfileAsset>);
+            // Written back so that a field the profile has gained since is in the file with its default.
+            EditorUtility.SetDirty(profile);
+            AssetDatabase.SaveAssetIfDirty(profile);
             return Build(DefaultRigPath, profile, GeneratedFolder, PrefabPath);
         }
 
@@ -50,14 +57,102 @@ namespace Wirenook.Locomotion.Editor
         public static string BakeFor(string avatarPrefabAssetPath, string outputFolder)
         {
             outputFolder = outputFolder.Replace('\\', '/').TrimEnd('/');
-            var profile = AssetFolders.LoadOrCreate(outputFolder + "/" + ProfileFile, () =>
+            return Build(avatarPrefabAssetPath, FittedProfile(outputFolder), outputFolder, outputFolder + "/" + PrefabFile);
+        }
+
+        /// <summary>
+        /// Sets the style an avatar's fitted bake uses to one of
+        /// <see cref="GaitStyles"/> and bakes it again: the step after
+        /// trying them with <see cref="BakeStyles"/>. The body settings of
+        /// the folder's profile are kept.
+        /// </summary>
+        public static string BakeForInStyle(string avatarPrefabAssetPath, string outputFolder, string styleName)
+        {
+            var style = GaitStyles.All.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, styleName, StringComparison.OrdinalIgnoreCase));
+            if (style == null)
             {
-                var shipped = AssetDatabase.LoadAssetAtPath<GaitProfileAsset>(DefaultProfilePath);
-                return shipped != null
-                    ? UnityEngine.Object.Instantiate(shipped)
-                    : ScriptableObject.CreateInstance<GaitProfileAsset>();
-            });
-            return Build(avatarPrefabAssetPath, profile, outputFolder, outputFolder + "/" + PrefabFile);
+                throw new ArgumentException("There is no style called \"" + styleName + "\"; there are: " +
+                                            string.Join(", ", GaitStyles.All.Select(candidate => candidate.Name)) + ".");
+            }
+
+            outputFolder = outputFolder.Replace('\\', '/').TrimEnd('/');
+            var profile = FittedProfile(outputFolder);
+            profile.style = style.Profile.Clone();
+            EditorUtility.SetDirty(profile);
+            AssetDatabase.SaveAssetIfDirty(profile);
+            return "Style: " + style.Name + "\n" +
+                   Build(avatarPrefabAssetPath, profile, outputFolder, outputFolder + "/" + PrefabFile);
+        }
+
+        /// <summary>
+        /// Bakes every style in <see cref="GaitStyles"/> for one avatar into
+        /// <paramref name="outputFolder"/>, with a prefab that installs them
+        /// all and adds a "Walk style" menu to choose between them in game.
+        /// It is for trying the styles on: the choice costs eight synced
+        /// bits and the controller holds every style's clips, several times
+        /// the size of a single bake. Once one is chosen, bake it alone with
+        /// <see cref="BakeForInStyle"/>.
+        /// </summary>
+        public static string BakeStyles(string avatarPrefabAssetPath, string outputFolder)
+        {
+            outputFolder = outputFolder.Replace('\\', '/').TrimEnd('/');
+            var rig = LoadRig(avatarPrefabAssetPath);
+            var bakes = new List<LocomotionBake>();
+            using (var humanoid = new HumanoidRig(rig))
+            {
+                var body = humanoid.Measured;
+                if (!body.IsValid)
+                    throw new InvalidOperationException("Could not measure usable body proportions from " + rig.name + ".");
+                foreach (var style in GaitStyles.All)
+                {
+                    bakes.Add(LocomotionBake.Bake(humanoid, body, style.Profile, style.Name));
+                }
+            }
+
+            var report = new StringBuilder("Baked " + bakes.Count + " styles for " + rig.name + " into " + outputFolder + "\n");
+            foreach (var bake in bakes)
+            {
+                var checkedBake = BakeVerifier.Verify(bake, rig);
+                if (!checkedBake.Passed)
+                {
+                    throw new InvalidOperationException(
+                        "The \"" + bake.Name + "\" bake for " + avatarPrefabAssetPath +
+                        " did not pass its checks; nothing was written.\n" + checkedBake.Report);
+                }
+
+                string clips = checkedBake.Report.ToString();
+                report.Append(bake.Describe()).Append(clips.Substring(0, clips.IndexOf('\n') + 1));
+            }
+
+            AssetFolders.Ensure(outputFolder);
+            var baseController = LocomotionControllers.BuildBase(bakes, outputFolder + "/" + LocomotionControllers.BaseFile);
+            // The lean and the bank are the first style's. They answer
+            // acceleration, not the stride, and differ little between styles.
+            var additive = LocomotionControllers.BuildAdditive(bakes[0], outputFolder + "/" + LocomotionControllers.AdditiveFile);
+            string prefabPath = outputFolder + "/" + StylesPrefabFile;
+            BuildStylesPrefab(prefabPath, baseController, additive);
+            AssetDatabase.SaveAssets();
+
+            if (!ControllerVerifier.Verify(bakes[0], rig, baseController, additive, out string controllers))
+            {
+                throw new InvalidOperationException(
+                    "The controllers written to " + outputFolder + " did not pass their checks; do not ship them.\n" + controllers);
+            }
+
+            report.Append(controllers);
+            for (int style = 1; style < bakes.Count; style++)
+            {
+                if (!ControllerVerifier.VerifyStyle(bakes[style], style, rig, baseController, additive, out string chosen))
+                {
+                    throw new InvalidOperationException(
+                        "Style " + style + " (" + bakes[style].Name + ") in " + outputFolder + " does not play its own gait.\n" + chosen);
+                }
+
+                report.Append(chosen);
+            }
+
+            return report + "prefab: " + prefabPath;
         }
 
         /// <summary>
@@ -83,6 +178,18 @@ namespace Wirenook.Locomotion.Editor
             ControllerVerifier.Verify(bake, rig, baseController, additive, out string controllers);
             InstallVerifier.Verify(rig, LoadRig(PrefabPath), bake, out string install);
             return bake.Describe() + BakeVerifier.Verify(bake, rig).Report + controllers + install;
+        }
+
+        /// <summary>The gait profile an avatar's own bake is made from, created from the shipped one on first use.</summary>
+        private static GaitProfileAsset FittedProfile(string outputFolder)
+        {
+            return AssetFolders.LoadOrCreate(outputFolder + "/" + ProfileFile, () =>
+            {
+                var shipped = AssetDatabase.LoadAssetAtPath<GaitProfileAsset>(DefaultProfilePath);
+                return shipped != null
+                    ? UnityEngine.Object.Instantiate(shipped)
+                    : ScriptableObject.CreateInstance<GaitProfileAsset>();
+            });
         }
 
         private static string Build(string rigPath, GaitProfileAsset profile, string folder, string prefabPath)
@@ -137,6 +244,40 @@ namespace Wirenook.Locomotion.Editor
             });
         }
 
+        /// <summary>
+        /// The same drop-in for a controller that holds every style, with
+        /// the menu that chooses one: a "Walk style" folder holding a switch
+        /// per style. The choice is one synced integer, so everyone sees the
+        /// walk the wearer picked.
+        /// </summary>
+        private static void BuildStylesPrefab(string path, AnimatorController baseController, AnimatorController additive)
+        {
+            FeaturePrefab.Edit(path, root =>
+            {
+                FeaturePrefab.Describe(root, "locomotion-styles", "Walk styles to choose between", "locomotion", "");
+                Replace(root, VRCAvatarDescriptor.AnimLayerType.Base, baseController);
+                Replace(root, VRCAvatarDescriptor.AnimLayerType.Additive, additive);
+
+                FeaturePrefab.Parameters(root, FeaturePrefab.SyncedInt(LocomotionControllers.Style));
+                FeaturePrefab.InstallMenu(root);
+                FeaturePrefab.MenuFolder(root, "Walk style", "locomotion");
+
+                // A switch left over from a style that no longer exists would set a number nothing plays.
+                var names = GaitStyles.All.Select(style => style.Name).ToList();
+                foreach (var child in root.transform.Cast<Transform>().ToList())
+                {
+                    if (!names.Contains(child.name)) UnityEngine.Object.DestroyImmediate(child.gameObject);
+                }
+
+                for (int index = 0; index < names.Count; index++)
+                {
+                    var item = FeaturePrefab.Child(root, names[index]);
+                    item.transform.SetSiblingIndex(index);
+                    FeaturePrefab.MenuToggle(item, names[index], "locomotion", LocomotionControllers.Style, index);
+                }
+            });
+        }
+
         private static void Replace(GameObject root, VRCAvatarDescriptor.AnimLayerType layer,
             RuntimeAnimatorController controller)
         {
@@ -170,6 +311,17 @@ namespace Wirenook.Locomotion.Editor
 
         [MenuItem("Tools/Wirenook/Locomotion/Bake For Selected Avatar", true)]
         private static bool CanBakeForSelection() => SelectedAvatarPath() != null;
+
+        [MenuItem("Tools/Wirenook/Locomotion/Bake Every Style For Selected Avatar")]
+        private static void BakeStylesForSelectionMenu()
+        {
+            string path = SelectedAvatarPath();
+            string name = Path.GetFileNameWithoutExtension(path);
+            Debug.Log(BakeStyles(path, "Assets/Wirenook Locomotion/" + name + " Styles"));
+        }
+
+        [MenuItem("Tools/Wirenook/Locomotion/Bake Every Style For Selected Avatar", true)]
+        private static bool CanBakeStylesForSelection() => SelectedAvatarPath() != null;
 
         /// <summary>The prefab or model asset behind the selection, whether it is selected in the Project or in a scene.</summary>
         private static string SelectedAvatarPath()

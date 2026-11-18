@@ -49,6 +49,13 @@ namespace Wirenook.Locomotion.Editor
         public const string PushX = Prefix + "PushX";
         public const string PushZ = Prefix + "PushZ";
 
+        /// <summary>
+        /// Which style plays, when a controller holds several: 0 for the
+        /// first, 1 for the next. Unlike the others this one is the
+        /// wearer's choice, so it is in the avatar's menu and is synced.
+        /// </summary>
+        public const string Style = Prefix + "Style";
+
         // VRChat substitutes its own copy for any clip called proxy_* from
         // this folder, so these cost the avatar nothing to reference.
         private const string ProxyFolder =
@@ -71,6 +78,16 @@ namespace Wirenook.Locomotion.Editor
 
         public static AnimatorController BuildBase(LocomotionBake bake, string path)
         {
+            return BuildBase(new[] { bake }, path);
+        }
+
+        /// <summary>
+        /// The Base controller for one style, or for several to choose
+        /// between with the <see cref="Style"/> parameter. Every style has
+        /// the same states; only the motion inside each differs.
+        /// </summary>
+        public static AnimatorController BuildBase(IReadOnlyList<LocomotionBake> bakes, string path)
+        {
             var builder = ControllerBuilder.Rebuild(path);
             builder.Float(VelocityX).Float(VelocityY).Float(VelocityZ).Float(Upright, 1f)
                 .Bool(Grounded, true).Bool(Seated).Bool(Afk)
@@ -78,16 +95,60 @@ namespace Wirenook.Locomotion.Editor
                 // drive a blend tree, which picks the clip set without adding states.
                 .Float(VRMode)
                 .Float(Cadence, 1f);
+            // The same goes for the style: an integer in the menu, a float here.
+            if (bakes.Count > 1) builder.Float(Style);
             var trees = new Trees(builder);
 
-            var standing = trees.Between("Standing", VRMode,
-                0f, GaitTree(builder, trees, bake.Desktop, "Standing (desktop)"),
-                1f, GaitTree(builder, trees, bake.Tracked, "Standing (tracked)"));
+            // One motion for a state: per style, the desktop clips or the
+            // tracked ones by VRMode; then, with several styles, the one
+            // the Style parameter names. At a whole number a 1D tree plays
+            // exactly one child, so the styles never mix.
+            Motion Choose(string name, Func<ClipSet, string, Motion> make)
+            {
+                var perStyle = bakes.Select(bake =>
+                {
+                    string label = name + (bakes.Count > 1 ? " [" + bake.Name + "]" : "");
+                    return (Motion)trees.Between(label, VRMode,
+                        0f, make(bake.Desktop, label + " (desktop)"),
+                        1f, make(bake.Tracked, label + " (tracked)"));
+                }).ToList();
+                return perStyle.Count == 1
+                    ? perStyle[0]
+                    : builder.Tree(name, Style, perStyle.Select((motion, index) => ((float)index, motion)).ToArray());
+            }
 
-            BuildLocomotionLayer(builder, standing, CrouchingTree(trees), ProneTree(trees));
-            builder.Layer("Cadence").State("Cadence", CadenceTree(builder, trees, bake.Desktop));
+            var motions = new LocomotionMotions
+            {
+                Standing = Choose("Standing", (set, label) => GaitTree(builder, trees, set.Idle, set.Moving, label)),
+                Crouching = Choose("Crouching", (set, label) => GaitTree(builder, trees, set.CrouchIdle, set.Crouching, label)),
+                Prone = ProneTree(trees),
+                Still = Choose("Standing still", (set, label) => Store(builder, set.Lean.Neutral)),
+                Rising = Choose("Rising", (set, label) => Store(builder, set.Rising)),
+                Falling = Choose("Falling", (set, label) => Store(builder, set.Falling)),
+                Plunging = Choose("Plunging", (set, label) => Store(builder, set.Plunging)),
+                SoftLanding = Choose("Landing", (set, label) => Store(builder, set.SoftLanding)),
+                HardLanding = Choose("Hard landing", (set, label) => Store(builder, set.HardLanding)),
+            };
+
+            BuildLocomotionLayer(builder, motions);
+            // Every style is baked at the same velocities, so one cadence serves them all.
+            builder.Layer("Cadence").State("Cadence", CadenceTree(builder, trees, bakes[0].Desktop));
             builder.Save();
             return builder.Controller;
+        }
+
+        /// <summary>What each state of the locomotion layer plays.</summary>
+        private sealed class LocomotionMotions
+        {
+            public Motion Standing;
+            public Motion Crouching;
+            public Motion Prone;
+            public Motion Still;
+            public Motion Rising;
+            public Motion Falling;
+            public Motion Plunging;
+            public Motion SoftLanding;
+            public Motion HardLanding;
         }
 
         public static AnimatorController BuildAdditive(LocomotionBake bake, string path)
@@ -146,13 +207,15 @@ namespace Wirenook.Locomotion.Editor
         // ---- Base ---------------------------------------------------------
 
         /// <summary>
-        /// The standing blend tree for one clip set: every baked gait at the
-        /// velocity it was baked for, on VRChat's own velocity parameters.
+        /// A blend tree of gaits, standing or crouched: an idle in the
+        /// middle and every baked gait at the velocity it was baked for, on
+        /// VRChat's own velocity parameters.
         /// </summary>
-        private static BlendTree GaitTree(ControllerBuilder builder, Trees trees, ClipSet set, string name)
+        private static BlendTree GaitTree(ControllerBuilder builder, Trees trees, BakedClip idle, List<MovingClip> gaits,
+            string name)
         {
-            var children = new List<TreeChild> { new TreeChild(Store(builder, set.Idle), 0f, 0f) };
-            foreach (var moving in set.Moving)
+            var children = new List<TreeChild> { new TreeChild(Store(builder, idle), 0f, 0f) };
+            foreach (var moving in gaits)
             {
                 var clip = Store(builder, moving.Clip);
                 children.Add(new TreeChild(clip, moving.Velocity.x, moving.Velocity.y));
@@ -202,27 +265,30 @@ namespace Wirenook.Locomotion.Editor
 
         /// <summary>
         /// The state machine of VRChat's default locomotion controller, with
-        /// the same thresholds and timings, around the generated standing
-        /// tree. Its jump-and-fall sub-machine is flattened into the layer; an
-        /// exit from it there is a transition to Standing here.
+        /// the same states, thresholds and timings, playing the generated
+        /// motions. Its jump-and-fall sub-machine is flattened into the
+        /// layer; an exit from it there is a transition to Standing here.
+        ///
+        /// The default plays one clip for a hop and a short fall alike. Here
+        /// going up and coming down are different shapes, and each landing
+        /// is a clip that ends, which is what the way out of it waits for.
         /// </summary>
-        private static void BuildLocomotionLayer(ControllerBuilder builder, Motion standingTree, Motion crouchingTree,
-            Motion proneTree)
+        private static void BuildLocomotionLayer(ControllerBuilder builder, LocomotionMotions motions)
         {
             var layer = builder.Layer("Locomotion");
-            var standing = layer.State("Standing", standingTree);
+            var standing = layer.State("Standing", motions.Standing);
             standing.State.speedParameterActive = true;
             standing.State.speedParameter = Cadence;
-            var crouching = layer.State("Crouching", crouchingTree);
-            var prone = layer.State("Prone", proneTree);
+            var crouching = layer.State("Crouching", motions.Crouching);
+            var prone = layer.State("Prone", motions.Prone);
 
-            var smallHop = layer.State("SmallHop", Proxy("fall_short"));
-            var shortFall = layer.State("Short Fall", Proxy("fall_short"));
-            var longFall = layer.State("LongFall", Proxy("fall_long"));
-            var quickLand = layer.State("QuickLand", Proxy("land_quick"));
-            var hardLand = layer.State("HardLand", Proxy("landing"));
-            var restoreTracking = layer.State("RestoreTracking", Proxy("stand_still"));
-            var restoreToHop = layer.State("RestoreToHop", Proxy("fall_short"));
+            var smallHop = layer.State("SmallHop", motions.Rising);
+            var shortFall = layer.State("Short Fall", motions.Falling);
+            var longFall = layer.State("LongFall", motions.Plunging);
+            var quickLand = layer.State("QuickLand", motions.SoftLanding);
+            var hardLand = layer.State("HardLand", motions.HardLanding);
+            var restoreTracking = layer.State("RestoreTracking", motions.Still);
+            var restoreToHop = layer.State("RestoreToHop", motions.Rising);
 
             // What the default controller hands to animation while airborne,
             // and gives back on the way out. Standing, crouching and prone
@@ -262,7 +328,12 @@ namespace Wirenook.Locomotion.Editor
 
             hardLand.To(restoreTracking).Fade(0.2f).AfterTime(0.6f);
             quickLand.To(restoreTracking).Fade(0.1f).AfterTime(1f);
-            restoreTracking.To(standing).Fade(0.25f).AfterTime(0f);
+            // The default leaves this state by an exit time of zero, which
+            // works because its clip has no length. A clip with a length
+            // would have passed any exit time while the state was still
+            // fading in, and then hold a still pose for a whole loop. So the
+            // way out is a condition that is always true.
+            restoreTracking.To(standing).Fade(0.25f).IfTrue(Grounded).Or().IfFalse(Grounded);
 
             restoreToHop.To(shortFall).Less(VelocityY, -2f);
             restoreToHop.To(standing).Fade(0.25f).IfTrue(Afk).Or().IfTrue(Seated).Or().IfTrue(Grounded);
@@ -281,28 +352,8 @@ namespace Wirenook.Locomotion.Editor
             });
         }
 
-        // Crouching and prone are VRChat's own trees, rebuilt child for child.
-        private static BlendTree CrouchingTree(Trees trees)
-        {
-            var forward = Proxy("crouch_walk_forward");
-            var right = Proxy("crouch_walk_right");
-            var right45 = Proxy("crouch_walk_right_45");
-            var right135 = Proxy("crouch_walk_right_135");
-            return trees.Blend2D("Crouching", BlendTreeType.FreeformDirectional2D, VelocityX, VelocityZ, new[]
-            {
-                new TreeChild(Proxy("crouch_still"), 0f, 0f),
-                new TreeChild(forward, 0f, 1.78f),
-                new TreeChild(forward, 0f, 1.25f),
-                new TreeChild(forward, 0f, -1.25f, -1f, mirrored: true),
-                new TreeChild(right, 1.25f, 0f),
-                new TreeChild(right, -1.25f, 0f, mirrored: true),
-                new TreeChild(right45, 1.25f, 1.25f),
-                new TreeChild(right45, -1.25f, 1.25f, mirrored: true),
-                new TreeChild(right135, 1.25f, -1.25f),
-                new TreeChild(right135, -1.25f, -1.25f, mirrored: true),
-            });
-        }
-
+        // Lying down is not a gait, and the model has nothing to say about
+        // it: prone is VRChat's own tree, rebuilt child for child.
         private static BlendTree ProneTree(Trees trees)
         {
             var forward = Proxy("low_crawl_forward");

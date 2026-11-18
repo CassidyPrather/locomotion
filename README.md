@@ -3,7 +3,9 @@
 Procedural walking and running for VRChat avatars. A parametric model of a
 biped's gait is baked into humanoid animation clips, and two generated animator
 controllers replace VRChat's default locomotion with them: the Base layer plays
-the gaits, the Additive layer leans the body into acceleration and turns.
+the gaits, the Additive layer leans the body into acceleration and turns. The
+same model crouches, and gives the body a shape for jumping, falling and
+landing, so that only lying prone is left to VRChat's own animation.
 
 "Weighty" is a set of numbers here, not a mood. The pelvis sinks into each step
 and rises over the planted leg, the knee gives after the heel lands, the upper
@@ -41,6 +43,22 @@ feet slide in proportion. To fit an avatar:
   them, and `Gait Profile.asset`, a copy of the style used. Use that prefab
   instead of the shipped one. Edit the profile and bake again to restyle that
   avatar alone.
+
+To choose a style for an avatar by wearing it:
+
+- **Bake Every Style For Selected Avatar**, or
+  `LocomotionBuild.BakeStyles(avatarPrefabAssetPath, outputFolder)`, bakes
+  every named style (see [Styles](#styles)) for that avatar into one pair of
+  controllers and writes a `Wirenook Locomotion Styles.prefab` that installs
+  them with a **Walk style** menu: one switch per style, one synced integer
+  (eight bits). Put it on the avatar in place of the locomotion prefab, not
+  beside it, and switch between the styles in game.
+
+  It is a tool for choosing, not something to keep on an avatar: the Base
+  controller holds every style's clips, about 15 MB of text apiece.
+- `LocomotionBuild.BakeForInStyle(avatarPrefabAssetPath, outputFolder, "Sway")`
+  then makes the one chosen that avatar's own: it sets the folder's
+  `Gait Profile.asset` to the style and bakes it as `BakeFor` does.
 
 Other entry points, also under **Tools > Wirenook > Locomotion**:
 
@@ -159,6 +177,25 @@ the left foot landing; the right foot runs half a cycle behind.
 over one loop, with two breaths. `Posture.Stand` gives the static leaning poses
 the Additive layer blends.
 
+- **Crouching.** `GaitCycle` and `StandingCycle` both take a `crouched` flag,
+  and the result is the same gait held low: the pelvis comes down by
+  `CrouchDepth`, the hips go back and the chest forward by `CrouchLean` to
+  stay over the feet, the knees part, the steps shorten to four fifths, and
+  the pelvis is carried nearly level where an upright walker vaults over each
+  straight leg. The hands are carried bent in front and swing half as far.
+  The constants that are not style are in `Crouching`. Feet are planted and
+  swung exactly as upright, so every guarantee about them still holds.
+- **The air.** `AirCycle` is a held shape for each of three moments, with the
+  limbs working a little so it is not a statue: going up (stretched, one knee
+  ahead, toes pointed), coming down (legs gathering, arms out by `AirReach`)
+  and a long drop (knees up and apart, arms about twice as wide, the chest
+  tipped to see the ground). The pelvis stays at standing height and the legs
+  are drawn up under it, because the avatar's root travels with the body.
+- **Landing.** `LandingCycle` plays once: the knees take the fall by
+  `LandingGive`, the hips go back and the chest forward, and the body stands
+  up again. A hard landing sinks 2.6 times as deep, stays down a moment and
+  takes 0.9 s where a soft one takes 0.4 s.
+
 ### Style parameters
 
 All are fields of `GaitProfile`, edited on a `GaitProfileAsset`
@@ -192,6 +229,10 @@ body length, so a profile carries over between body sizes.
 | `ArmSwing` | degrees | 0 to 40 | 22 | Shoulder swing each way at a brisk walk; grows with speed. |
 | `ArmSpread` | degrees | 0 to 25 | 8 | How far the arms hang from the body. |
 | `RunElbowBend` | degrees | 30 to 110 | 80 | Elbow bend carried while running. |
+| `CrouchDepth` | fraction of leg length | 0.2 to 0.5 | 0.36 | How far the pelvis comes down in a crouch. Not `Crouch`, which only keeps upright knees from locking. |
+| `CrouchLean` | degrees | 0 to 45 | 26 | How far the chest tips forward over the knees in a crouch; landings scale with it. |
+| `AirReach` | degrees | 0 to 60 | 30 | How far the arms go out for balance while falling; a long drop about doubles it, and the chest tips with them. |
+| `LandingGive` | fraction of leg length | 0.05 to 0.2 | 0.12 | How far the knees give on a soft landing; a hard one sinks 2.6 times as deep. |
 | `IdlePeriod` | seconds | 4 to 16 | 8 | Length of the idle loop. |
 | `IdleSway` | fraction of hip width | 0 to 0.4 | 0.12 | Pelvis travel toward each foot while idling. |
 | `BreathDepth` | degrees | 0 to 4 | 1.5 | Chest rise per breath. |
@@ -207,6 +248,22 @@ width, foot length and ankle height are measured from the rig's T-pose. When
 off, the values on the asset are used and the result is scaled to the rig by
 leg length.
 
+### Styles
+
+`GaitStyles.All` names six profiles to start from. Each is the default with a
+handful of numbers changed, all inside the ranges above, and the tests hold
+every one to the same guarantees as the default. They are what
+`BakeStyles` puts behind the Walk style menu.
+
+| Style | What it looks like | What it changes |
+| --- | --- | --- |
+| Weighty | The body sinks into each step and the upper body trails it. | Nothing: it is the default. |
+| Light | Quick and upright; the feet come off the ground easily. | `Weight` 0.6, less loading drop, sway and lag, higher steps, more arm swing, a faster and smaller lean. |
+| Sway | From the hips: feet nearly in one line, the pelvis swinging and the shoulders answering. | Pelvis sway, list and yaw up by half or more, `StepWidth` 0.25, more counter-rotation, arms held wider. |
+| Bouncy | Springs off every step: high feet, a deep give at the knee, a run that leaves the ground. | `StepHeight` 0.11, `LoadingDrop` 0.035, `RunBounce` 1.35, `ToeOffAngle` 68, more arm swing, wider in the air. |
+| Swagger | Long strides on a wide stance, toes out, arms held off the body. | `Weight` 1.35, `StrideScale` 1.1, `StepWidth` 1, `ToeOut` 13, more lag and pelvis yaw. |
+| Dainty | Small neat steps on a narrow track, feet low, elbows in. | `StrideScale` 0.84, `StepWidth` 0.3, `ToeOut` 2, lower steps, a flatter foot roll, less arm swing. |
+
 ## What is generated
 
 `LocomotionBuild` bakes by posing a copy of the rig's skeleton at each sample
@@ -220,20 +277,33 @@ muscle's range.
 Clips, each baked twice (see [VR](#vr)):
 
 - idle;
-- stroll at 0.7 m/s forward, backward and right; amble at 1.2 m/s forward;
+- stroll at 0.7 m/s forward, backward, right, and the diagonals (0.5, 0.5) and
+  (0.5, -0.5); amble at 1.2 m/s forward, backward and right;
 - walk at 2 m/s forward, backward, right, and the diagonals (2, 2) and (2, -2);
+- jog at 3 m/s forward and backward, and the diagonal (2, 3);
 - run at 4 m/s forward, backward, right, and the diagonals (2, 4) and (2, -4);
 - sprint at 6 m/s forward;
+- crouched: an idle, a creep at 0.6 m/s forward, 1.25 m/s forward, backward,
+  right and the diagonals (1.25, 1.25) and (1.25, -1.25), and 2 m/s forward;
+- three loops for the air (rising, falling, a long drop) and two landings
+  that play once;
 - seven standing poses for the lean: neutral, forward, back, left, right, bank
   left, bank right.
 
-The clips are stored inside the two generated controllers, about 8 MB of text
+The clips are stored inside the two generated controllers, about 16 MB of text
 between them.
 
 Leftward travel uses the rightward clips mirrored and offset half a cycle,
 which the model's symmetry makes exact. The walk and run speeds are VRChat's
 defaults, and (2, 4) is what a desktop player produces running diagonally,
 because the strafe speed caps sideways motion.
+
+A thumbstick produces every speed between, and a blend tree only gets the
+speed right at its samples: between two of them it mixes their stride lengths
+and their cadences each in a straight line, and the product of those is not
+one. So the samples are closest where stride and cadence change fastest with
+speed (below a walk) and where two different gaits meet (3 m/s, between a
+walk and a run).
 
 ### Base controller
 
@@ -243,14 +313,27 @@ drive a blend tree, and `Wirenook/Locomotion/Cadence`, which the controller
 computes.
 
 - **Locomotion** has the states and thresholds of VRChat's default controller.
-  Standing is a 2D freeform directional blend tree on `VelocityX` /
-  `VelocityZ` with each clip at the velocity it was baked for. Crouching and
-  Prone are VRChat's trees of `proxy_*` clips, switched by `Upright` (below
-  0.68 to crouch, below 0.41 to go prone, above 0.43 and 0.7 to come back).
-  SmallHop, Short Fall, LongFall, QuickLand, HardLand, RestoreTracking and
-  RestoreToHop use `proxy_fall_*`, `proxy_land*` and `proxy_stand_still` and
-  are driven by `Grounded` and `VelocityY` as in the default. The default's
-  jump-and-fall sub-state machine is flattened into the layer.
+  Standing and Crouching are 2D freeform directional blend trees on
+  `VelocityX` / `VelocityZ` with each clip at the velocity it was baked for.
+  Prone is VRChat's tree of `proxy_*` clips. `Upright` switches between them
+  (below 0.68 to crouch, below 0.41 to go prone, above 0.43 and 0.7 to come
+  back). SmallHop and RestoreToHop play the rising shape, Short Fall the
+  falling one, LongFall the long drop, QuickLand and HardLand the two
+  landings, and RestoreTracking a still stand; they are driven by `Grounded`
+  and `VelocityY` as in the default. The default's jump-and-fall sub-state
+  machine is flattened into the layer.
+
+  One thing differs from the default. It leaves RestoreTracking by an exit
+  time of zero, which works because its clip has no length. A clip with a
+  length would have passed any exit time while the state was still fading
+  in, and would then hold a still pose for a whole loop; here that
+  transition has a condition that is always true instead.
+- With several styles (`BakeStyles`) every state's motion is a 1D blend tree
+  over `Wirenook/Locomotion/Style`, declared as a float like `VRMode`, with
+  one style at each whole number. The menu's parameter is an integer; VRChat
+  converts a parameter to the type the animator declares, as its
+  documentation of mismatched parameter types says. At a whole number such a tree plays exactly
+  one child, so styles never mix; changing style switches without a fade.
 - **Cadence** sets a playback-speed multiplier for Standing: 1 inside the
   fastest baked speeds (6 m/s ahead, 4 m/s back and sideways), rising in
   proportion beyond them, up to 4×. Blend trees do not extrapolate; this is
@@ -311,28 +394,38 @@ All states have Write Defaults on.
 
 ## Verification
 
-`scripts/test.sh` runs 38 engine-free tests of the model: periodicity and
+`scripts/test.sh` runs 56 engine-free tests of the model: periodicity and
 continuity, planted feet moving at exactly minus the root velocity, no sole
 point below the ground, left and right half a cycle apart and mirrored, stride
 over duration equal to the requested speed, double support when walking and
 flight when running, legs always reaching their targets, direction handling,
 the weight parameters' effects, and the IK solver on reachable, unreachable
-and degenerate targets.
+and degenerate targets. The crouch is held to the same footing as the upright
+walk, and to being lower, leveller and shorter-stepped; the air shapes to
+lifted feet within reach and to growing wider from a hop to a long drop; the
+landings to sinking once, early, and standing up again. Every named style is
+run through all of it, tracked variant included, and checked against the
+ranges the profile documents.
 
 `LocomotionBuild.Verify()` checks the bake in the editor, without play mode:
 
-- **Clips.** Every gait clip is sampled back onto a fresh copy of the rig at 60
+- **Clips.** Every clip that stands on the ground (gaits upright and
+  crouched, idles, landings) is sampled back onto a fresh copy of the rig at 60
   phases between its keys. On the shipped bake the worst ankle is 7.3 mm from
   where the model put it (limit 20 mm), the lowest heel or ball is 2.8 mm below
   the ground (limit 10 mm) and a flat foot creeps at most 5.1 mm over a stance
-  (limit 10 mm). This is also what confirms the curve names and clip settings.
+  (limit 10 mm). The air clips are held to the ankles alone. This is also what
+  confirms the curve names and clip settings.
 - **Controllers.** The Base and Additive controllers are run in a playable
   graph stacked as VRChat stacks them, with the built-in parameters driven by
   hand. Checked: the blend tree reproduces the model at baked velocities,
-  including mirrored and VR sets (7.4 mm); planted-foot speed is within 1.8% of
-  ground speed at baked velocities and within 19% between them; the cadence
+  including mirrored and VR sets (7.4 mm), and the crouched tree does the same
+  below the crouching threshold (3.3 mm, hips at 63% of standing height);
+  planted-foot speed is within 1.8% of ground speed at baked velocities and
+  within 11% between them; the cadence
   multiplier is 1.00 inside the baked speeds and 2.00 at twice the fastest;
-  posture and jump/fall states follow `Upright`, `Grounded` and `VelocityY`;
+  posture follows `Upright`, and a jump, a short fall, a long drop and both
+  landings follow `Grounded` and `VelocityY` and come back to Standing;
   smoothing is frame-rate independent as above; stopping from 4 m/s rocks the
   pelvis back 80 mm on desktop, 28 mm with head and hands tracked, 0 with the
   body tracked, and returns to rest; banking is proportional to turn rate and
@@ -356,13 +449,23 @@ and degenerate targets.
     untested;
   - the Additive controller relies on animated animator parameters inside the
     Additive playable layer behaving as they do in a plain Unity playable
-    graph.
+    graph;
+  - how the crouch sits under a tracked head: the pose puts the hips at about
+    63% of standing height, whatever height the player's head is really at,
+    and whether the air shapes read at the speed a jump really goes by.
 - Between baked velocities the blend tree mixes neighbouring gaits, whose
   stride lengths and cadences do not combine into exactly the requested speed.
-  The planted foot is up to 19% off ground speed in the worst places measured:
-  backward and sideways between 0.7 and 2 m/s, and between a walk and a run,
-  where the two gaits also disagree about when the foot is down. Below 0.7 m/s
-  the idle is blended in and the steps are slower than the ground.
+  The planted foot is up to 11% off ground speed in the worst places measured,
+  which are now the diagonals between baked ones: (1.4, 1.4), and (1, 3).
+  Straight ahead, behind and sideways it is within 8%, worst at 1 m/s. Below
+  0.7 m/s the idle is blended in and the steps are slower than the ground.
+- The crouch, the air shapes and the landings are drawn, not derived: where
+  the gaits follow from footfalls and the reach of the legs, these are poses
+  with numbers chosen by eye on two rigs in the editor. Which air shape plays
+  is decided by VRChat's default thresholds, so a jump shows the rising shape
+  until it is falling faster than 2 m/s. Lying prone is still VRChat's crawl.
+- Changing style with the Walk style menu switches at once, with no fade, and
+  the lean and bank are the first style's whichever is chosen.
 - Beyond the fastest baked speeds the cadence correction is exact straight
   ahead, back and sideways and overestimates by up to a third on fast
   diagonals.
@@ -511,7 +614,8 @@ Descended from https://github.com/vrchat-community/template-package
 The shipped bake was made by posing the robot avatar from the VRChat Avatars
 SDK's samples; the generated clips hold only humanoid muscle values, and
 nothing from that model is redistributed here. The generated controllers
-reference the SDK's `proxy_*` clips and its `VRCAnimatorTrackingControl`
-behaviour, which every project with the SDK already has.
+reference the SDK's `proxy_low_crawl_*` clips, for lying prone, and its
+`VRCAnimatorTrackingControl` behaviour, which every project with the SDK
+already has.
 
 Vendored third-party material is inventoried in [CREDITS.md](CREDITS.md).

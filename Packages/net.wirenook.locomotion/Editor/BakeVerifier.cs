@@ -39,8 +39,9 @@ namespace Wirenook.Locomotion.Editor
             using var rig = new HumanoidRig(rigSource);
             foreach (var set in new[] { bake.Desktop, bake.Tracked })
             {
-                VerifyClip(set.Idle, bake.Body, rig, result);
-                foreach (var moving in set.Moving) VerifyClip(moving.Clip, bake.Body, rig, result);
+                foreach (var clip in set.OnTheGround) VerifyClip(clip, bake.Body, rig, result, true);
+                // Nothing stands on anything in the air; only the ankles are checked.
+                foreach (var clip in set.InTheAir) VerifyClip(clip, bake.Body, rig, result, false);
             }
 
             result.Report.Insert(0,
@@ -51,7 +52,7 @@ namespace Wirenook.Locomotion.Editor
             return result;
         }
 
-        private static void VerifyClip(BakedClip baked, BodyProportions body, HumanoidRig rig, Result result)
+        private static void VerifyClip(BakedClip baked, BodyProportions body, HumanoidRig rig, Result result, bool onTheGround)
         {
             var clip = new AnimationClip { name = baked.Name, hideFlags = HideFlags.HideAndDontSave };
             try
@@ -74,7 +75,7 @@ namespace Wirenook.Locomotion.Editor
                         var ankle = rig.Ankle(side);
                         var foot = expected.Foot(side);
                         ankleError = Mathf.Max(ankleError, (ankle - foot.Ankle.ToUnity()).magnitude);
-                        lowestSole = Mathf.Min(lowestSole, rig.LowestSoleHeight(side));
+                        if (onTheGround) lowestSole = Mathf.Min(lowestSole, rig.LowestSoleHeight(side));
 
                         // A flat foot is fixed to the ground: adding back the
                         // distance the root has travelled must give the same
@@ -103,8 +104,8 @@ namespace Wirenook.Locomotion.Editor
                 result.LowestSole = Mathf.Min(result.LowestSole, lowestSole);
                 result.WorstSlip = Mathf.Max(result.WorstSlip, slip);
                 result.Report.AppendLine(
-                    (passed ? "  ok   " : "  FAIL ") + baked.Name.PadRight(30) + " ankle " + Millimetres(ankleError) +
-                    "  sole " + Millimetres(lowestSole) + "  slip " + Millimetres(slip) + "  " +
+                    (passed ? "  ok   " : "  FAIL ") + baked.Name.PadRight(38) + " ankle " + Millimetres(ankleError) +
+                    "  sole " + (onTheGround ? Millimetres(lowestSole) : "(in the air)") + "  slip " + Millimetres(slip) + "  " +
                     baked.Duration.ToString("F2") + " s, " + baked.Curves.Values.Sum(curve => curve.length) + " keys");
             }
             finally

@@ -14,6 +14,10 @@ namespace Wirenook.Locomotion
     /// rest. The pelvis then rides as high as the legs can reach, less
     /// whatever the body's weight takes off, so the knees bend where that
     /// weight says they should and never have to stretch past straight.
+    ///
+    /// The same cycle walks crouched: the pelvis is carried lower and more
+    /// level, the hips go back and the chest forward over the knees, and
+    /// the steps shorten (see <see cref="Crouching"/>).
     /// </summary>
     public sealed class GaitCycle : IPoseCycle
     {
@@ -45,6 +49,8 @@ namespace Wirenook.Locomotion
         private readonly float _strideYaw;
         private readonly float _leanPitch;
         private readonly float _leanRoll;
+        private readonly bool _crouched;
+        private readonly float _crouchBack;
         private readonly float[] _reachCos = new float[HeightHarmonics + 1];
         private readonly float[] _reachSin = new float[HeightHarmonics + 1];
         private readonly float _top;
@@ -57,7 +63,7 @@ namespace Wirenook.Locomotion
 
         public Vector3 RootVelocity => Request.Velocity;
 
-        public GaitCycle(GaitProfile profile, BodyProportions body, GaitRequest request)
+        public GaitCycle(GaitProfile profile, BodyProportions body, GaitRequest request, bool crouched = false)
         {
             if (profile == null) throw new ArgumentNullException(nameof(profile));
             if (!body.IsValid) throw new ArgumentException("Body proportions must all be positive.", nameof(body));
@@ -65,8 +71,20 @@ namespace Wirenook.Locomotion
             _profile = profile;
             _body = body;
             _foot = new FootShape(body);
+            _crouched = crouched;
+            float crouchDrop = crouched ? profile.CrouchDepth * body.LegLength : 0f;
+            _crouchBack = Crouching.BackShare * crouchDrop;
             Request = request;
-            Timing = GaitTiming.Resolve(profile, body, request);
+            if (crouched)
+            {
+                var shortened = profile.Clone();
+                shortened.StrideScale *= Crouching.Stride;
+                Timing = GaitTiming.Resolve(shortened, body, request);
+            }
+            else
+            {
+                Timing = GaitTiming.Resolve(profile, body, request);
+            }
 
             float heading = request.Heading;
             float sideways = MathF.Abs(request.Direction.X);
@@ -130,6 +148,7 @@ namespace Wirenook.Locomotion
             float lean = MathF.Min(profile.ForwardLean * Timing.DimensionlessSpeed, 25f) * Rot.Deg;
             _leanPitch = lean * request.Direction.Y * (request.Direction.Y < 0f ? 0.5f : 1f);
             _leanRoll = -lean * request.Direction.X * 0.5f;
+            if (crouched) _leanPitch += profile.CrouchLean * Rot.Deg;
 
             // With the feet and the pelvis's plan position fixed, find how
             // high the legs allow the pelvis at each instant.
@@ -163,7 +182,7 @@ namespace Wirenook.Locomotion
                 top = MathF.Min(top, ceiling[i] - HeightBelowTop((float)i / HeightSamples));
             }
 
-            _top = top - profile.Crouch * profile.Weight * body.LegLength;
+            _top = top - profile.Crouch * profile.Weight * body.LegLength - crouchDrop;
         }
 
         public GaitPose Evaluate(float phase)
@@ -210,8 +229,9 @@ namespace Wirenook.Locomotion
             float surgeAmplitude = _profile.Surge * _body.LegLength * weight * MathF.Min(speed / ReferenceSpeed, 1.5f);
             float surge = surgeAmplitude * MathF.Sin(2f * Tau * (phase - 0.5f * (duty - 0.5f)));
 
-            var lateral = Rot.Apply(Rot.Yaw(_turn), Vector3.UnitX);
-            position = _travel * surge + lateral * sway;
+            var facing = Rot.Yaw(_turn);
+            var lateral = Rot.Apply(facing, Vector3.UnitX);
+            position = _travel * surge + lateral * sway - Rot.Apply(facing, Vector3.UnitZ) * _crouchBack;
 
             // The hip of the leg that is reaching forward leads.
             float yaw = _turn + _strideYaw * MathF.Cos(Tau * phase);
@@ -238,7 +258,10 @@ namespace Wirenook.Locomotion
                 float reach = 0f;
                 for (int k = 0; k <= HeightHarmonics; k++)
                 {
-                    reach += _reachCos[k] * MathF.Cos(Tau * k * phase) + _reachSin[k] * MathF.Sin(Tau * k * phase);
+                    // The mean is where the path hangs; the rest is the vault,
+                    // which bent legs mostly take out.
+                    float share = k == 0 || !_crouched ? 1f : Crouching.Vault;
+                    reach += share * (_reachCos[k] * MathF.Cos(Tau * k * phase) + _reachSin[k] * MathF.Sin(Tau * k * phase));
                 }
 
                 // Weight adds a sag on top. It starts as the foot comes down,
@@ -289,9 +312,18 @@ namespace Wirenook.Locomotion
             float carried = Timing.Regime == GaitRegime.Run
                 ? _profile.RunElbowBend * Rot.Deg
                 : 12f * Rot.Deg * MathF.Min(speed / ReferenceSpeed, 1f) + 8f * Rot.Deg;
+            float held = 0f;
+            if (_crouched)
+            {
+                // Crouched, the hands are carried bent in front of the body and swing less.
+                amplitude *= Crouching.ArmSwing;
+                carried = MathF.Max(carried, Crouching.ElbowBend * Rot.Deg);
+                held = Crouching.HandsForward * Rot.Deg;
+            }
+
             return new ArmPose
             {
-                Swing = amplitude * forward,
+                Swing = held + amplitude * forward,
                 Spread = _profile.ArmSpread * Rot.Deg,
                 // The elbow closes a little on the way forward and opens on the way back.
                 ElbowBend = carried + 0.4f * MathF.Abs(amplitude) * (0.5f + 0.5f * forward),
@@ -303,7 +335,7 @@ namespace Wirenook.Locomotion
             float phase = side == Side.Left ? cyclePhase : Shaping.Wrap01(cyclePhase + 0.5f);
             float duty = Timing.DutyFactor;
             float stride = Timing.StrideLength;
-            float yaw = _turn + (int)side * _profile.ToeOut * Rot.Deg;
+            float yaw = _turn + (int)side * (_profile.ToeOut + (_crouched ? Crouching.KneesOut : 0f)) * Rot.Deg;
             var heading = Rot.Yaw(yaw);
             float pitch = FootPitch(phase);
             var track = _trackNormal * ((int)side * _trackHalfWidth) + Vector3.UnitY * _body.AnkleHeight;

@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace Wirenook.Locomotion.Editor
 {
-    /// <summary>One baked loop: the motion it came from and the humanoid curves that reproduce it.</summary>
+    /// <summary>One baked clip: the motion it came from and the humanoid curves that reproduce it.</summary>
     internal sealed class BakedClip
     {
         public string Name;
@@ -76,11 +76,29 @@ namespace Wirenook.Locomotion.Editor
         private const float PositionTolerance = 0.0004f;
         private const float RotationTolerance = 0.0004f;
 
+        /// <summary>Bakes a loop: phase 1 is phase 0 again, and the curves close on themselves.</summary>
         public static BakedClip Bake(string name, IPoseCycle cycle, HumanoidRig rig, BodyProportions body)
+        {
+            return Bake(name, cycle, rig, body, true);
+        }
+
+        /// <summary>
+        /// Bakes a motion that plays once, from phase 0 to phase 1, and holds
+        /// its last pose: a landing.
+        /// </summary>
+        public static BakedClip BakeOnce(string name, IPoseCycle cycle, HumanoidRig rig, BodyProportions body)
+        {
+            return Bake(name, cycle, rig, body, false);
+        }
+
+        private static BakedClip Bake(string name, IPoseCycle cycle, HumanoidRig rig, BodyProportions body, bool loop)
         {
             // About one sample per frame at 60 fps; a slow idle needs far fewer
             // than its length suggests, a sprint needs a minimum to hold its shape.
-            int samples = Mathf.Clamp(Mathf.RoundToInt(cycle.Duration * FrameRate), 40, 96);
+            // A loop's last sample is one step short of its first; a clip that
+            // plays once needs one at each end.
+            int samples = Mathf.Clamp(Mathf.RoundToInt(cycle.Duration * FrameRate), 40, 96) + (loop ? 0 : 1);
+            int steps = loop ? samples : samples - 1;
             var muscles = DrivenMuscles();
             var tracks = new float[RootPosition.Length + RootRotation.Length + muscles.Count][];
             for (int i = 0; i < tracks.Length; i++) tracks[i] = new float[samples];
@@ -88,7 +106,7 @@ namespace Wirenook.Locomotion.Editor
             var previous = Quaternion.identity;
             for (int s = 0; s < samples; s++)
             {
-                rig.Apply(cycle.Evaluate((float)s / samples), body);
+                rig.Apply(cycle.Evaluate((float)s / steps), body);
                 var pose = rig.ReadHumanPose();
 
                 // q and -q are the same rotation but interpolate differently;
@@ -107,21 +125,21 @@ namespace Wirenook.Locomotion.Editor
                 foreach (int muscle in muscles) tracks[track++][s] = pose.muscles[muscle];
             }
 
-            var clip = new BakedClip { Name = name, Cycle = cycle, Duration = cycle.Duration, Loop = true };
+            var clip = new BakedClip { Name = name, Cycle = cycle, Duration = cycle.Duration, Loop = loop };
             int index = 0;
             foreach (string property in RootPosition)
             {
-                clip.Curves[property] = PeriodicCurve(tracks[index++], cycle.Duration, PositionTolerance);
+                clip.Curves[property] = ReducedCurve(tracks[index++], cycle.Duration, PositionTolerance, loop);
             }
 
             foreach (string property in RootRotation)
             {
-                clip.Curves[property] = PeriodicCurve(tracks[index++], cycle.Duration, RotationTolerance);
+                clip.Curves[property] = ReducedCurve(tracks[index++], cycle.Duration, RotationTolerance, loop);
             }
 
             foreach (int muscle in muscles)
             {
-                clip.Curves[HumanTrait.MuscleName[muscle]] = PeriodicCurve(tracks[index++], cycle.Duration, MuscleTolerance);
+                clip.Curves[HumanTrait.MuscleName[muscle]] = ReducedCurve(tracks[index++], cycle.Duration, MuscleTolerance, loop);
             }
 
             return clip;
@@ -163,20 +181,28 @@ namespace Wirenook.Locomotion.Editor
         }
 
         /// <summary>
-        /// A looping curve through evenly spaced samples of one period, with
-        /// as few keys as reproduce every sample within the tolerance.
+        /// A curve through evenly spaced samples, with as few keys as
+        /// reproduce every sample within the tolerance. A loop's samples
+        /// cover one period and the curve closes on itself; otherwise the
+        /// first and last samples are the two ends.
         /// </summary>
-        private static AnimationCurve PeriodicCurve(float[] samples, float duration, float tolerance)
+        private static AnimationCurve ReducedCurve(float[] samples, float duration, float tolerance, bool loop)
         {
             int count = samples.Length;
-            float step = duration / count;
-            float Value(int i) => samples[(i % count + count) % count];
-            // Slopes from the neighbours on both sides, wrapping around the
-            // loop, so the curve leaves its last key the way it enters its first.
-            float Slope(int i) => (Value(i + 1) - Value(i - 1)) / (2f * step);
+            int last = loop ? count : count - 1;
+            float step = duration / last;
+            float Value(int i) => loop ? samples[(i % count + count) % count] : samples[Mathf.Clamp(i, 0, count - 1)];
+            // Slopes from the neighbours on both sides. A loop wraps around,
+            // so the curve leaves its last key the way it enters its first;
+            // an end with no neighbour beyond it takes the slope of its one side.
+            float Slope(int i)
+            {
+                if (loop || (i > 0 && i < last)) return (Value(i + 1) - Value(i - 1)) / (2f * step);
+                return i == 0 ? (Value(1) - Value(0)) / step : (Value(last) - Value(last - 1)) / step;
+            }
 
-            var keep = new SortedSet<int> { 0, count };
-            Refine(0, count);
+            var keep = new SortedSet<int> { 0, last };
+            Refine(0, last);
 
             var keys = new List<Keyframe>();
             foreach (int i in keep) keys.Add(new Keyframe(i * step, Value(i), Slope(i), Slope(i)));

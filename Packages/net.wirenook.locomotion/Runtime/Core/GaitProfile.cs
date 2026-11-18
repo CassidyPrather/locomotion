@@ -147,6 +147,31 @@ namespace Wirenook.Locomotion
         /// <summary>Elbow bend carried while running. Degrees, 30 to 110.</summary>
         public float RunElbowBend = 80f;
 
+        // ---- Crouching and the air ---------------------------------------------
+
+        /// <summary>
+        /// How far the pelvis comes down in a crouch. Not to be confused with
+        /// <see cref="Crouch"/>, which only keeps the knees of an upright
+        /// walk from locking. Fraction of leg length, 0.2 to 0.5.
+        /// </summary>
+        public float CrouchDepth = 0.36f;
+
+        /// <summary>How far the chest tips forward over the knees in a crouch. Degrees, 0 to 45.</summary>
+        public float CrouchLean = 26f;
+
+        /// <summary>
+        /// How far the arms go out for balance while falling; a long drop
+        /// throws them about twice as wide, and the chest tips with them.
+        /// Degrees, 0 to 60.
+        /// </summary>
+        public float AirReach = 30f;
+
+        /// <summary>
+        /// How far the knees give on landing from a jump; a hard landing
+        /// sinks more than twice as deep. Fraction of leg length, 0.05 to 0.2.
+        /// </summary>
+        public float LandingGive = 0.12f;
+
         // ---- Idle ---------------------------------------------------------
 
         /// <summary>Length of the idle loop: one shift of weight to each side. Seconds, 4 to 16.</summary>
@@ -212,6 +237,10 @@ namespace Wirenook.Locomotion
             tracked.HipTurn *= 0.5f;
             tracked.IdleSway *= 0.5f;
             tracked.RunBounce *= 0.6f;
+            // Crouched, airborne or landing, the head is still where the
+            // player's is: the legs fold under an upright body.
+            tracked.CrouchLean = 0f;
+            tracked.AirReach = 0f;
             return tracked;
         }
     }

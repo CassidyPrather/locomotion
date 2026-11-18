@@ -49,6 +49,7 @@ MonoBehaviour:
   id: locomotion
   label: Weighty locomotion
   icon: {fileID: 2800000, guid: 1e164e79e79a80944b2a7cf469faaac7, type: 3}
+  summaryIcon: {fileID: 2800000, guid: 1e164e79e79a80944b2a7cf469faaac7, type: 3}
   tag: 
   tagPriority: 0
   joinAvatarMesh: 0

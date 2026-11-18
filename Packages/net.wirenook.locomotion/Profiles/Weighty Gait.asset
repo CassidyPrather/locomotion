@@ -45,6 +45,10 @@ MonoBehaviour:
     ArmSwing: 22
     ArmSpread: 8
     RunElbowBend: 80
+    CrouchDepth: 0.36
+    CrouchLean: 26
+    AirReach: 30
+    LandingGive: 0.12
     IdlePeriod: 8
     IdleSway: 0.12
     BreathDepth: 1.5

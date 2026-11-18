@@ -7,6 +7,9 @@ namespace Wirenook.Locomotion
     /// Standing still, which is not the same as not moving: over one loop the
     /// weight drifts onto one foot and back onto the other, the unloaded hip
     /// sags a little, and the chest rises and falls with two breaths.
+    ///
+    /// Crouched, it is the same loop held low: hips back, chest forward over
+    /// the knees, hands bent in front (see <see cref="Crouching"/>).
     /// </summary>
     public sealed class StandingCycle : IPoseCycle
     {
@@ -16,13 +19,15 @@ namespace Wirenook.Locomotion
         private readonly GaitProfile _profile;
         private readonly BodyProportions _body;
         private readonly float _height;
+        private readonly bool _crouched;
 
-        public StandingCycle(GaitProfile profile, BodyProportions body)
+        public StandingCycle(GaitProfile profile, BodyProportions body, bool crouched = false)
         {
             if (profile == null) throw new ArgumentNullException(nameof(profile));
             if (!body.IsValid) throw new ArgumentException("Body proportions must all be positive.", nameof(body));
             _profile = profile;
             _body = body;
+            _crouched = crouched;
 
             // Shifting sideways asks one leg to reach further. Ride at the
             // height the most stretched instant allows, so the pelvis path
@@ -36,7 +41,8 @@ namespace Wirenook.Locomotion
                     pose.LeftFoot.Ankle, pose.RightFoot.Ankle));
             }
 
-            _height = height - profile.Crouch * profile.Weight * body.LegLength;
+            _height = height - profile.Crouch * profile.Weight * body.LegLength
+                      - (crouched ? profile.CrouchDepth * body.LegLength : 0f);
         }
 
         public float Duration => _profile.IdlePeriod;
@@ -61,22 +67,42 @@ namespace Wirenook.Locomotion
             shift = Shaping.Dwell(MathF.Sin(Tau * phase));
             float breath = MathF.Sin(Tau * BreathsPerLoop * phase);
 
+            float lean = _crouched ? _profile.CrouchLean * Rot.Deg : 0f;
+            float back = _crouched ? Crouching.BackShare * _profile.CrouchDepth * _body.LegLength : 0f;
+
             var pose = Posture.Stand(_profile, _body, 0f, 0f);
-            pose.PelvisPosition = new Vector3(shift * _profile.IdleSway * _body.HipWidth * weight, 0f, 0f);
+            pose.PelvisPosition = new Vector3(shift * _profile.IdleSway * _body.HipWidth * weight, 0f, -back);
             // The hip over the loaded leg rides high and the other sags.
             float list = shift * 0.35f * _profile.PelvisList * Rot.Deg * weight;
-            pose.PelvisRotation = Rot.Roll(list);
+            pose.PelvisRotation = Rot.Euler(0f, 0.35f * lean, list);
 
             // The chest stays nearly level over the tilted pelvis and opens on the in-breath.
             float breathPitch = -_profile.BreathDepth * Rot.Deg * breath;
-            pose.ChestRotation = Rot.Euler(0f, breathPitch, -0.3f * list);
-            pose.HeadRotation = Rot.Pitch(-0.3f * breathPitch);
+            pose.ChestRotation = Rot.Euler(0f, lean + breathPitch, -0.3f * list);
+            pose.HeadRotation = Rot.Pitch(0.3f * lean - 0.3f * breathPitch);
 
             // Breathing in lifts the shoulders, which carries the arms out a touch.
             float spread = _profile.ArmSpread * Rot.Deg + 0.3f * _profile.BreathDepth * Rot.Deg * breath;
             pose.LeftArm.Spread = spread;
             pose.RightArm.Spread = spread;
+            if (_crouched)
+            {
+                pose.LeftArm.Swing = pose.RightArm.Swing = Crouching.HandsForward * Rot.Deg;
+                pose.LeftArm.ElbowBend = pose.RightArm.ElbowBend = Crouching.ElbowBend * Rot.Deg;
+                // The knees part to make room for the body, as they do in the crouched walk.
+                pose.LeftFoot = KneesOut(pose.LeftFoot, Side.Left);
+                pose.RightFoot = KneesOut(pose.RightFoot, Side.Right);
+            }
+
             return pose;
+        }
+
+        private static FootPose KneesOut(FootPose foot, Side side)
+        {
+            var turn = Rot.Yaw((int)side * Crouching.KneesOut * Rot.Deg);
+            foot.Rotation = turn * foot.Rotation;
+            foot.KneeDirection = Rot.Apply(turn, foot.KneeDirection);
+            return foot;
         }
     }
 
