@@ -77,7 +77,7 @@ others.
 | --- | --- | --- | --- |
 | `Wirenook Flight` | A cloud under the feet to stand on in mid-air (see `Editor/FlightBuild.cs`). PC only. | 1 | 1 collider, 1 constraint |
 | `Wirenook Stepladder` | A ladder that comes out under your feet when you have lifted yourself off the floor by moving your play space. | 2 | 11 constraints, 9 bones |
-| `Wirenook Nap` | While you are away (VRChat's AFK) the avatar stands asleep, nodding off, with Zs rising from its head, instead of VRChat's kneel. | 0 | 3 bones |
+| `Wirenook Nap` | While you are away (VRChat's AFK, or the "AFK" switch it adds to the menu) the avatar stands asleep, nodding off, with Zs rising from its head, instead of VRChat's kneel. | 1 | 3 bones on PC; nothing on Android and iOS |
 
 ### Stepladder
 
@@ -120,15 +120,32 @@ forward and to one side, three slow breaths to a loop and the head sinking
 until it is caught with a small start. It is baked like the gaits and has
 the same kind of tests.
 
-It goes into the Action playable layer as a layer added on top of whatever
-is there, which for most avatars is VRChat's default. That default already
-raises the Action layer and hands the body from tracking to animation while
-AFK is set, and none of it is replaced: the nap is a second pose over
-VRChat's kneel, on a layer whose weight is faded up while AFK is set and
-down after. At weight zero it changes nothing, so emotes play as before.
+It starts on either of two things: VRChat's own `AFK`, or the "AFK" switch
+the prefab adds to the menu (`WN/Away`, one synced bit, the same switch the
+other ways of being away use; see `WirenookAway` in `net.wirenook.assets`).
 
-The Zs are a small model on the head, switched by the same AFK flag, which
-VRChat syncs itself.
+It goes into the Action playable layer as a layer added on top of whatever
+is there, which for most avatars is VRChat's default, on a layer whose
+weight is faded up while the wearer is away and down after. At weight zero
+it changes nothing, so emotes play as before. VRChat's default raises the
+Action layer and hands the body from tracking to animation for its own AFK
+and for nothing else, so the nap does both itself as well, for the switch,
+and does them again every two seconds while it lasts: VRChat hands the
+body back when its own AFK ends, whatever the switch says.
+
+The Zs are a small model on the head, switched by the same two flags. They
+are left out of Android and iOS builds, where the nap is an animation and
+nothing more.
+
+While it naps the prefab holds the animator parameter `WN/Asleep` at one
+(`WirenookSignals.Asleep`), from an animation, so on every client and with
+no synced bit. An avatar's own animator can declare it as a float and
+close its eyes by it; where nothing naps it rests at nought.
+
+The nap is one of three ways of being away, with the crash and the
+vanishing of `net.wirenook.party-tricks`. The prefab is marked with its
+flavour (`WirenookAfk`), and an avatar whose root names another
+(`WirenookAfkChoice`) is built without it.
 
 ## The gait model
 
@@ -569,6 +586,9 @@ Not checked, because only a client can:
 - How the nap sits over VRChat's own AFK pose in the legs and feet, which
   come from both, and whether 0.25 s is long enough to fade out under
   VRChat's own blend back to tracking.
+- The nap on the menu's switch alone, with the wearer still tracked: that
+  taking the body from tracking every two seconds holds it, and that
+  nothing shows at each taking.
 
 ## Development
 
