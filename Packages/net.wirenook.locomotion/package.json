@@ -1,7 +1,7 @@
 {
   "name": "net.wirenook.locomotion",
   "displayName": "Wirenook Locomotion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "unity": "2022.3",
   "description": "Procedural, weighty locomotion and collider flight for VRChat avatars.",
   "author": {
@@ -13,6 +13,9 @@
   "vpmDependencies": {
     "com.vrchat.avatars": "^3.10.6",
     "nadena.dev.modular-avatar": "^1.18.7",
-    "net.wirenook.assets": "^0.1.0"
-  }
+    "net.wirenook.assets": "^0.2.0"
+  },
+  "url": "https://github.com/CassidyPrather/locomotion",
+  "documentationUrl": "https://github.com/CassidyPrather/locomotion#readme",
+  "changelogUrl": "https://github.com/CassidyPrather/locomotion/releases"
 }
