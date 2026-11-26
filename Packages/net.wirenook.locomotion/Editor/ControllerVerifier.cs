@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -52,6 +53,67 @@ namespace Wirenook.Locomotion.Editor
             verifier.BankFollowsTurns();
             report = (verifier._passed ? "PASS" : "FAIL") + ": controllers\n" + verifier._report;
             return verifier._passed;
+        }
+
+        /// <summary>
+        /// The checks that hold for any Base controller built on this state
+        /// machine, whatever it plays: posture follows Upright, and jumping,
+        /// falling and landing follow Grounded and VelocityY.
+        /// </summary>
+        public static bool VerifyStates(GameObject rigSource, AnimatorController baseController, out string report)
+        {
+            using var verifier = new ControllerVerifier(null, rigSource, baseController, null);
+            verifier.PostureFollowsUpright();
+            verifier.JumpingAndFallingFollowTheDefaultController();
+            report = verifier._report.ToString();
+            return verifier._passed;
+        }
+
+        /// <summary>
+        /// How far, in metres, the left hand strays from where it starts over
+        /// some seconds at one velocity, with the Additive controller laid
+        /// over the Base one: what a fidget adds, where it plays.
+        /// </summary>
+        public static float HandTravel(GameObject rigSource, AnimatorController baseController, AnimatorController additive,
+            float forward, bool vr, float seconds)
+        {
+            using var verifier = new ControllerVerifier(null, rigSource, baseController, additive);
+            using var simulator = verifier.Start(true, vr ? 1f : 0f);
+            Move(simulator, 0f, forward);
+            simulator.Run(1f, Frame);
+            // Against the arm's own swing: the same moments of a cycle, a whole number of cycles apart.
+            float cycle = simulator.Base.GetCurrentAnimatorStateInfo(0).length;
+            int perCycle = Mathf.Max(1, Mathf.RoundToInt(cycle / Frame));
+            float frame = cycle / perCycle;
+            var first = new Vector3[perCycle];
+            float travel = 0f;
+            for (int i = 0; i * frame < seconds; i++)
+            {
+                simulator.Step(frame);
+                var hand = verifier._rig.RootPosition(HumanBodyBones.LeftHand);
+                if (i < perCycle) first[i] = hand;
+                else travel = Mathf.Max(travel, (hand - first[i % perCycle]).magnitude);
+            }
+
+            return travel;
+        }
+
+        /// <summary>
+        /// How fast a planted foot passes under the root at each velocity,
+        /// as a share of that velocity: 1 is a foot that holds the ground.
+        /// Zero when no foot is ever planted there.
+        /// </summary>
+        public static float[] FootSpeedShares(GameObject rigSource, AnimatorController baseController,
+            IReadOnlyList<Vector2> velocities)
+        {
+            using var verifier = new ControllerVerifier(null, rigSource, baseController, null);
+            var shares = new float[velocities.Count];
+            for (int i = 0; i < shares.Length; i++)
+            {
+                shares[i] = verifier.FootSpeed(velocities[i].x, velocities[i].y) / velocities[i].magnitude;
+            }
+
+            return shares;
         }
 
         /// <summary>The two checks that show a pair of controllers is alive: the gaits play and the body leans.</summary>

@@ -119,9 +119,11 @@ namespace Wirenook.Locomotion.Editor
 
             var motions = new LocomotionMotions
             {
-                Standing = Choose("Standing", (set, label) => GaitTree(builder, trees, set.Idle, set.Moving, label)),
-                Crouching = Choose("Crouching", (set, label) => GaitTree(builder, trees, set.CrouchIdle, set.Crouching, label)),
-                Prone = ProneTree(trees),
+                Standing = Choose("Standing", (set, label) => GaitTree(builder, trees, set.Idle, set.Moving, label, bakes[0].Blend)),
+                Crouching = Choose("Crouching", (set, label) => GaitTree(builder, trees, set.CrouchIdle, set.Crouching, label, bakes[0].Blend)),
+                Prone = bakes[0].Desktop.Prone != null ? Choose("Prone", (set, label) => Store(builder, set.Prone))
+                    : bakes[0].ProneLiesStill ? Proxy("low_crawl_still")
+                    : ProneTree(trees),
                 Still = Choose("Standing still", (set, label) => Store(builder, set.Lean.Neutral)),
                 Rising = Choose("Rising", (set, label) => Store(builder, set.Rising)),
                 Falling = Choose("Falling", (set, label) => Store(builder, set.Falling)),
@@ -132,7 +134,8 @@ namespace Wirenook.Locomotion.Editor
 
             BuildLocomotionLayer(builder, motions);
             // Every style is baked at the same velocities, so one cadence serves them all.
-            builder.Layer("Cadence").State("Cadence", CadenceTree(builder, trees, bakes[0].Desktop));
+            // Without the layer the parameter stays at the 1 it is declared with.
+            if (bakes[0].ScaleCadence) builder.Layer("Cadence").State("Cadence", CadenceTree(builder, trees, bakes[0].Desktop));
             builder.Save();
             return builder.Controller;
         }
@@ -204,6 +207,39 @@ namespace Wirenook.Locomotion.Editor
             return builder.Controller;
         }
 
+        /// <summary>
+        /// An Additive controller for a set that does not lean: nothing,
+        /// or one small loop laid over standing still at a desktop, where
+        /// no tracking would hide it. It replaces VRChat's own additive
+        /// layer, which breathes.
+        /// </summary>
+        public static AnimatorController BuildFidgetAdditive(BakedClip neutral, BakedClip fidget, string path)
+        {
+            var builder = ControllerBuilder.Rebuild(path);
+            builder.Float(VelocityX).Float(VelocityZ).Float(Upright, 1f).Bool(Grounded, true).Bool(Seated).Int(VRMode);
+            // A controller's first layer cannot be additive, so one that does nothing comes first:
+            // what the Additive playable layer then lays over the Base one is the difference alone.
+            builder.Layer("Rest").State("Rest");
+            var layer = builder.Layer("Fidget", 1f, null, AnimatorLayerBlendingMode.Additive);
+            var reference = Store(builder, neutral);
+            var still = layer.State("Still", reference);
+            if (fidget != null)
+            {
+                // Slower than anything a thumbstick holds on purpose.
+                const float moving = 0.05f;
+                const float fade = 0.1f;
+                var fidgeting = layer.State("Fidgeting", Store(builder, fidget, reference));
+                still.To(fidgeting).Fade(fade).Equal(VRMode, 0).IfTrue(Grounded).IfFalse(Seated).Greater(Upright, 0.7f)
+                    .Less(VelocityX, moving).Greater(VelocityX, -moving).Less(VelocityZ, moving).Greater(VelocityZ, -moving);
+                fidgeting.To(still).Fade(fade).Equal(VRMode, 1).Or().IfFalse(Grounded).Or().IfTrue(Seated).Or()
+                    .Less(Upright, 0.7f).Or().Greater(VelocityX, moving).Or().Less(VelocityX, -moving).Or()
+                    .Greater(VelocityZ, moving).Or().Less(VelocityZ, -moving);
+            }
+
+            builder.Save();
+            return builder.Controller;
+        }
+
         // ---- Base ---------------------------------------------------------
 
         /// <summary>
@@ -212,7 +248,7 @@ namespace Wirenook.Locomotion.Editor
         /// VRChat's own velocity parameters.
         /// </summary>
         private static BlendTree GaitTree(ControllerBuilder builder, Trees trees, BakedClip idle, List<MovingClip> gaits,
-            string name)
+            string name, BlendTreeType blend)
         {
             var children = new List<TreeChild> { new TreeChild(Store(builder, idle), 0f, 0f) };
             foreach (var moving in gaits)
@@ -225,7 +261,7 @@ namespace Wirenook.Locomotion.Editor
                 }
             }
 
-            return trees.Blend2D(name, BlendTreeType.FreeformDirectional2D, VelocityX, VelocityZ, children);
+            return trees.Blend2D(name, blend, VelocityX, VelocityZ, children);
         }
 
         /// <summary>

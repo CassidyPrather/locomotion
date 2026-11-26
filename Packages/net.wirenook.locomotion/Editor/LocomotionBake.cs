@@ -47,6 +47,9 @@ namespace Wirenook.Locomotion.Editor
         public BakedClip SoftLanding;
         public BakedClip HardLanding;
 
+        /// <summary>Lying down, at any speed. Null plays VRChat's own crawl.</summary>
+        public BakedClip Prone;
+
         public LeanClips Lean;
 
         /// <summary>Every clip that stands or walks on the ground, upright or crouched.</summary>
@@ -131,6 +134,25 @@ namespace Wirenook.Locomotion.Editor
 
         /// <summary>What the style is called; empty when a bake holds only one.</summary>
         public string Name = "";
+
+        /// <summary>
+        /// How the gait tree mixes its samples. Directional suits samples
+        /// laid out as rings of speeds round an idle, which is how the
+        /// gait model's are; Cartesian suits a grid.
+        /// </summary>
+        public UnityEditor.Animations.BlendTreeType Blend = UnityEditor.Animations.BlendTreeType.FreeformDirectional2D;
+
+        /// <summary>
+        /// Whether the cycle plays faster beyond the fastest sample. A set
+        /// whose fastest samples take no steps has nothing to speed up.
+        /// </summary>
+        public bool ScaleCadence = true;
+
+        /// <summary>
+        /// Whether lying down is one still pose at any speed (VRChat's own,
+        /// so the view stays where VRChat expects it) and not its crawl.
+        /// </summary>
+        public bool ProneLiesStill;
 
         public BodyProportions Body;
         public GaitProfile Profile;

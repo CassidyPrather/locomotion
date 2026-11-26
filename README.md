@@ -264,6 +264,31 @@ every one to the same guarantees as the default. They are what
 | Swagger | Long strides on a wide stance, toes out, arms held off the body. | `Weight` 1.35, `StrideScale` 1.1, `StepWidth` 1, `ToeOut` 13, more lag and pelvis yaw. |
 | Dainty | Small neat steps on a narrow track, feet low, elbows in. | `StrideScale` 0.84, `StepWidth` 0.3, `ToeOut` 2, lower steps, a flatter foot roll, less arm swing. |
 
+## Motions of your own
+
+`CustomLocomotion` (`Editor/CustomLocomotion.cs`) is for a body that
+should not walk like a person. It takes motions the caller wrote, as
+`IPoseCycle`s that return a `GaitPose` (a pelvis, two feet, a chest, a
+head and two arms, in the space the avatar's root moves through), and
+does the rest of what the package does for its own walk: bakes them into
+humanoid clips on a rig, lays them out over `VelocityX` and `VelocityZ`,
+and puts them in the same state machine, with the same prefab to install
+it. A set names a motion for standing, any number of moving ones with the
+velocity each is for, the same crouched, three for the air and two
+landings; optionally one for lying down (without it, VRChat's crawl, or
+its still pose at any speed) and a fidget to lay over standing still at a
+desktop.
+
+What it leaves out is what makes the package's walk a person's: the gait
+model, the cadence that rises with speed, the lean of the Additive layer,
+and the checks that hold a bake to them. It keeps the checks that are true
+of any motion: that sampled feet are where the motion put them, that
+nothing goes through the ground, that a planted foot does not creep, that
+`Upright`, `Grounded` and `VelocityY` move the state machine as VRChat's
+default does. `net.wirenook.bot` in
+[cass-avatar](https://github.com/CassidyPrather/cass-avatar) is the one
+user so far.
+
 ## What is generated
 
 `LocomotionBuild` bakes by posing a copy of the rig's skeleton at each sample
